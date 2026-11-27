@@ -1,0 +1,95 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>PSL Animation Viewer</title>
+<style>
+  body { margin:0; font-family:system-ui,sans-serif; background:#0d0d10; color:#eee; overflow:hidden; }
+  #ui { position:fixed; top:0; right:0; width:300px; height:100vh; background:#16161c;
+        padding:14px; box-sizing:border-box; overflow:auto; }
+  h3 { margin:4px 0 12px; font-size:15px; color:#8bd; }
+  button { display:block; width:100%; text-align:left; margin:3px 0; padding:9px 11px;
+           background:#23232c; color:#eee; border:1px solid #333; border-radius:6px;
+           cursor:pointer; font-size:13px; }
+  button:hover { background:#2e2e3a; }
+  button.active { background:#22bb66; color:#000; font-weight:600; }
+  #hint { font-size:11px; color:#666; margin-top:12px; line-height:1.5; }
+</style>
+</head>
+<body>
+<div id="ui">
+  <h3>Animations (file se)</h3>
+  <div id="list">loading…</div>
+  <div id="hint">Mouse: drag = rotate, scroll = zoom.<br>Animation names come from the file itself.</div>
+</div>
+<script type="importmap">
+{ "imports": {
+  "three": "https://unpkg.com/three@0.180.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.180.0/examples/jsm/"
+}}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// Which file to show: viewer.html?file=../output/<character>_animations.glb
+const MODEL_FILE = new URLSearchParams(location.search).get('file');
+if (!MODEL_FILE) {
+  document.getElementById('list').innerHTML =
+    'No file given. Open:<br><code>viewer.html?file=../output/&lt;character&gt;_animations.glb</code>';
+  throw new Error('no ?file= given');
+}
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0d0d10);
+const cam = new THREE.PerspectiveCamera(45, (innerWidth-300)/innerHeight, 0.01, 100);
+const rn = new THREE.WebGLRenderer({ antialias:true });
+rn.setSize(innerWidth-300, innerHeight);
+document.body.prepend(rn.domElement);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x333355, 2.2));
+const dl = new THREE.DirectionalLight(0xffffff, 2); dl.position.set(2,4,3); scene.add(dl);
+const ctr = new OrbitControls(cam, rn.domElement);
+
+let mixer, cur = null;
+// cache-bust: browser ko hamesha fresh file load karne pe majboor karo
+new GLTFLoader().load(MODEL_FILE + '?t=' + Date.now(), (g) => {
+  scene.add(g.scene);
+  mixer = new THREE.AnimationMixer(g.scene);
+
+  // auto-frame the model
+  const box = new THREE.Box3().setFromObject(g.scene);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  const dist = Math.max(size.x, size.y, size.z) * 1.6;
+  cam.position.set(center.x, center.y, center.z + dist);
+  ctr.target.copy(center);
+  ctr.update();
+
+  const list = document.getElementById('list');
+  list.innerHTML = '';
+  g.animations.forEach((clip) => {
+    const b = document.createElement('button');
+    b.textContent = clip.name;             // <-- naam seedha file se
+    b.onclick = () => {
+      if (cur) cur.stop();
+      document.querySelectorAll('button').forEach(x => x.classList.remove('active'));
+      cur = mixer.clipAction(clip);
+      cur.reset().play();
+      b.classList.add('active');
+    };
+    list.appendChild(b);
+  });
+}, undefined, (e) => {
+  document.getElementById('list').textContent = 'Load error: ' + e;
+});
+
+const clk = new THREE.Clock();
+(function loop(){ requestAnimationFrame(loop); if (mixer) mixer.update(clk.getDelta()); ctr.update(); rn.render(scene, cam); })();
+addEventListener('resize', () => {
+  cam.aspect = (innerWidth-300)/innerHeight; cam.updateProjectionMatrix();
+  rn.setSize(innerWidth-300, innerHeight);
+});
+</script>
+</body>
+</html>

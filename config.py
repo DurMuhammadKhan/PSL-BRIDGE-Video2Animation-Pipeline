@@ -4,13 +4,18 @@ config.py -- The ONLY file you normally need to edit.
 Add one or more PSL dictionary category URLs below. For each category you can
 either download the WHOLE category, or just a few specific words.
 
-For every category the pipeline creates two folders NEXT TO these scripts:
-    <category>_videos/       <- PSL .mp4 clips are downloaded here
-    <category>_animations/   <- Animics .glb animations are exported here
+Everything the pipeline produces goes under OUTPUT_DIR (default output/):
+    output/videos/<category>/          <- stage 1: PSL .mp4 clips
+    output/animations/<category>/      <- stage 2: Animics .glb animations
+    output/retargeted/                 <- stage 3: <character>_<category>.glb
+    output/<character>_animations.glb  <- stage 4: all animations in one file
 
-e.g. for "https://psl.org.pk/dictionary/10-around-the-house" you get
-    around-the-house_videos/  and  around-the-house_animations/
+e.g. for "https://psl.org.pk/dictionary/10-around-the-house" the category
+folder is named "around-the-house".
 """
+
+# Where all generated data goes (relative to this folder, or an absolute path).
+OUTPUT_DIR = "output"
 
 # ---------------------------------------------------------------------------
 # CATEGORIES: {category_url: words}
@@ -108,3 +113,55 @@ NUM_WORKERS = 1
 #           Mac: "/Users/<you>/Library/Application Support/Google/Chrome"
 CHROME_USER_DATA_DIR = None
 CHROME_PROFILE_DIRECTORY = "Default"   # e.g. "Default" or "Profile 1"
+
+# ---------------------------------------------------------------------------
+# RETARGET (Blender) settings -- stages 3 and 4
+# ---------------------------------------------------------------------------
+# Your rigged character. None -> use the one .glb/.gltf/.fbx inside character/.
+# Output files are named after it: character/Ali.glb -> output/Ali_animations.glb
+CHARACTER_FILE = None
+
+# Blender executable. None -> auto-detect (/Applications/Blender.app on Mac, or
+# `blender` on PATH).
+BLENDER_PATH = None
+
+# Map: YOUR character's bone name -> Animics animation bone name.
+# The Animics rig uses Mixamo-style names (Hips, Spine, LeftArm, ...). If your
+# character uses the same names you don't need to change anything. If not, put
+# your bone name on the left. Stage 3 prints an "AUTO-MATCH REPORT" listing any
+# of your bones it could not match - add those here.
+BONE_NAME_MAP = {
+    "Hips": "Hips",
+    "Spine": "Spine",
+    "Spine1": "Spine1",
+    "Spine2": "Spine2",
+    "Neck": "Neck",
+    "Head": "Head",
+    "LeftShoulder": "LeftShoulder",
+    "LeftArm": "LeftArm",
+    "LeftForeArm": "LeftForeArm",
+    "LeftHand": "LeftHand",
+    "RightShoulder": "RightShoulder",
+    "RightArm": "RightArm",
+    "RightForeArm": "RightForeArm",
+    "RightHand": "RightHand",
+    "LeftUpLeg": "LeftUpLeg",
+    "LeftLeg": "LeftLeg",
+    "LeftFoot": "LeftFoot",
+    "RightUpLeg": "RightUpLeg",
+    "RightLeg": "RightLeg",
+    "RightFoot": "RightFoot",
+    # add finger bones / extra bones here as needed
+}
+
+# True -> bones not in BONE_NAME_MAP are matched automatically by name
+# (case-insensitive, ignoring "mixamorig:" prefixes, then a "contains" match).
+AUTO_MATCH_UNMAPPED = True
+
+# Frame range to bake from each animation. None = the animation's full range.
+BAKE_FRAME_START = 5
+BAKE_FRAME_END = None
+
+# Action names ("<category>_<file name>") to redo even if already retargeted,
+# e.g. after replacing a source animation but keeping its name.
+FORCE_REPROCESS = set()

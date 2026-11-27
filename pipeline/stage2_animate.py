@@ -1,14 +1,14 @@
 """
-animics_animate.py -- Phase 2: turn downloaded PSL videos into .glb animations.
+stage2_animate.py -- Stage 2: turn downloaded PSL videos into .glb animations.
 
-For every category it reads the .mp4 files from <category>_videos/, drives
+For every category it reads the .mp4 files from output/videos/<category>/, drives
 Animics (https://animics.gti.upf.edu/) one clip at a time, and exports one .glb
-mocap animation per clip into <category>_animations/. It is resume-safe: a video
+mocap animation per clip into output/animations/<category>/. It is resume-safe: a video
 whose .glb already exists in the animations folder is skipped, so a clip that has
 already been animated is never processed again.
 
-Run this phase on its own (after downloading):
-    python animics_animate.py
+Run this stage on its own (after downloading):
+    python run.py --stage animate
 
 HOW IT WORKS (and why it should be reliable)
 --------------------------------------------
@@ -39,8 +39,8 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
+from common import BASE_DIR, category_slug, videos_dir_for, animations_dir_for  # sets sys.path
 import config
-from common import BASE_DIR, category_slug, videos_dir_for, animations_dir_for
 
 ANIMICS_URL = "https://animics.gti.upf.edu/"
 
@@ -450,4 +450,4 @@ def animate_all(categories=None):
 
 if __name__ == "__main__":
     animate_all()
-    print("\nAnimation phase done.")
+    print("\nAnimation stage done.")

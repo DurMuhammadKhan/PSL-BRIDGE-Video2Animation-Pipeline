@@ -7,11 +7,11 @@ initializing, so every animate session times out. Run this BEFORE a big batch:
 
     python check_animics.py
 
-  HEALTHY   -> go ahead and run `python run.py`
+  HEALTHY   -> go ahead and run `python run.py --stage animate`
   DEGRADED  -> the server is too slow right now; try again later (off-peak)
 
 Exit code is 0 when healthy, 1 when degraded, so you can also gate a run:
-    python check_animics.py && python run.py
+    python check_animics.py && python run.py --stage animate
 """
 import sys
 import time
@@ -63,7 +63,7 @@ def main():
             try:
                 if driver.execute_script(READY_JS):
                     print(f"HEALTHY - editor + character ready in {time.time() - t0:.0f}s. "
-                          f"Safe to run: python run.py")
+                          f"Safe to run: python run.py --stage animate")
                     return 0
             except Exception:
                 pass

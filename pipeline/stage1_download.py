@@ -1,15 +1,15 @@
 """
-psl_download.py -- Phase 1: download PSL Dictionary videos.
+stage1_download.py -- Stage 1: download PSL Dictionary videos.
 
 For every category in config.CATEGORIES it downloads the requested words (or the
-whole category) into <category>_videos/, keeping the website's exact word as the
+whole category) into output/videos/<category>/, keeping the website's exact word as the
 filename. It is resume-safe: a word whose .mp4 already exists is skipped, so an
 already-downloaded video is never fetched from the PSL directory again.
 
-Run this phase on its own:
-    python psl_download.py
+Run this stage on its own:
+    python run.py --stage download
 
-Videos land in <category>_videos/<word>.mp4 (filename EXACTLY as on the website:
+Videos land in output/videos/<category>/<word>.mp4 (filename EXACTLY as on the website:
 spaces, brackets, capitalization all preserved; only '/' and ':' are replaced
 because a filesystem can't contain them).
 """
@@ -25,8 +25,8 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
+from common import category_slug, videos_dir_for  # also puts the repo root on sys.path
 import config
-from common import category_slug, videos_dir_for
 
 BASE_URL = "https://psl.org.pk"
 
@@ -206,4 +206,4 @@ def download_all(categories=None):
 
 if __name__ == "__main__":
     download_all()
-    print("\nDownload phase done.")
+    print("\nDownload stage done.")

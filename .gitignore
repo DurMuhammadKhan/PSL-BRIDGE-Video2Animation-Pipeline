@@ -1,7 +1,10 @@
-# Generated data (created at runtime, per category) - don't commit these
-*_videos/
-*_animations/
+# Generated data - don't commit these
+output/
 *.tmp
+
+# Your character model (personal; only the folder's README is committed)
+character/*
+!character/README.md
 
 # Selenium's persistent Chrome profile (cache only, machine-specific)
 .chrome-profile/
