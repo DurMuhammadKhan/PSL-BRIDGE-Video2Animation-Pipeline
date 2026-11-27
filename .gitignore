@@ -3,6 +3,9 @@
 *_animations/
 *.tmp
 
+# Selenium's persistent Chrome profile (cache only, machine-specific)
+.chrome-profile/
+
 # Python
 __pycache__/
 *.pyc

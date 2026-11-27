@@ -27,6 +27,7 @@ import os
 import glob
 import time
 import threading
+import warnings
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from selenium import webdriver
@@ -39,12 +40,22 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
 import config
-from common import category_slug, videos_dir_for, animations_dir_for
+from common import BASE_DIR, category_slug, videos_dir_for, animations_dir_for
 
 ANIMICS_URL = "https://animics.gti.upf.edu/"
 
+# Selenium's underlying HTTP client has its OWN read timeout (default 120s) that
+# is separate from WebDriverWait. When animics.gti.upf.edu is slow, a single
+# driver.get() can take >120s to return, which shows up as the confusing
+# "HTTPConnectionPool(...): Read timed out (read timeout=120)" crash. We raise
+# both this client timeout and the page-load timeout so a slow site just waits.
+CLIENT_HTTP_TIMEOUT_SEC = 300   # the "120" in that Read-timed-out error
+PAGE_LOAD_TIMEOUT_SEC = 300     # max wait for driver.get() to return
+
 # Timeouts. The FIRST video of every browser session is slower because Animics
 # has to download/initialize MediaPipe's pose models before it can show trim.
+EDITOR_INIT_TIMEOUT_SEC = 180   # wait for the Keyframe editor to come up (slow site)
+SESSION_START_RETRIES = 3       # retry a chunk's session start before giving up
 FIRST_VIDEO_LOAD_TIMEOUT_SEC = 300
 VIDEO_LOAD_TIMEOUT_SEC = 240
 PER_VIDEO_TIMEOUT_SEC = 480     # max wait for pose extraction on one video
@@ -80,6 +91,21 @@ def safe_click(driver, element, worker_id=None, retries=6, delay=0.5):
 
 def build_driver(download_folder, worker_id=None, window_index=0):
     options = Options()
+    # "eager" = return from driver.get() once the DOM is ready, without blocking
+    # on every last sub-resource. Animics keeps loading heavy WebGL/MediaPipe
+    # assets in the background, so waiting for full "load" would stall for ages.
+    options.page_load_strategy = "eager"
+
+    # Persistent Chrome profile so the character model + MediaPipe models are
+    # cached on disk and don't cold-download every session (see config.py).
+    user_data_dir = config.CHROME_USER_DATA_DIR or os.path.join(BASE_DIR, ".chrome-profile")
+    if worker_id is not None and config.NUM_WORKERS > 1:
+        # Parallel workers can't share one profile dir; give each its own.
+        user_data_dir = os.path.join(user_data_dir, f"worker_{worker_id}")
+    os.makedirs(user_data_dir, exist_ok=True)
+    options.add_argument(f"--user-data-dir={user_data_dir}")
+    options.add_argument(f"--profile-directory={config.CHROME_PROFILE_DIRECTORY}")
+
     if config.HEADLESS_ANIMICS:
         options.add_argument("--headless=new")
     else:
@@ -109,6 +135,17 @@ def build_driver(download_folder, worker_id=None, window_index=0):
                 p for p in os.environ.get("PATH", "").split(os.pathsep) if p != stale_dir
             )
         driver = webdriver.Chrome(options=options)
+    # Raise Selenium's HTTP client read timeout above its 120s default so a slow
+    # animics.gti.upf.edu doesn't crash us with "Read timed out (read timeout=120)".
+    # (set_timeout is marked deprecated but is still the simplest per-driver knob;
+    # silence just that one warning so the logs stay readable.)
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            driver.command_executor.set_timeout(CLIENT_HTTP_TIMEOUT_SEC)
+    except Exception:
+        pass
+    driver.set_page_load_timeout(PAGE_LOAD_TIMEOUT_SEC)
     driver.set_script_timeout(30)
     driver.execute_cdp_cmd(
         "Page.setDownloadBehavior",
@@ -250,7 +287,8 @@ def start_session(driver, wait, chunk_videos, worker_id=None):
     safe_click(driver, keyframe_btn, worker_id=worker_id)
 
     log(worker_id, "Waiting for the Keyframe editor to initialize...")
-    if not wait_until_js(driver, EDITOR_READY_JS, timeout=60, worker_id=worker_id):
+    if not wait_until_js(driver, EDITOR_READY_JS, timeout=EDITOR_INIT_TIMEOUT_SEC,
+                         heartbeat=HEARTBEAT_SEC, worker_id=worker_id):
         log(worker_id, "Editor did not initialize in time.")
         return False
 
@@ -312,15 +350,36 @@ def worker_run(worker_id, video_list, download_folder):
 
     for chunk_idx, chunk_videos in enumerate(chunks, start=1):
         log(worker_id, f"=== chunk {chunk_idx}/{len(chunks)} "
-                       f"({len(chunk_videos)} video(s)) - fresh browser ===")
-        driver = build_driver(download_folder, worker_id=worker_id, window_index=worker_id - 1)
-        wait = WebDriverWait(driver, 60)
+                       f"({len(chunk_videos)} video(s)) ===")
+
+        # The site is often slow to hand over the editor. Rather than throwing
+        # away the whole chunk on one slow load, retry the session start a few
+        # times with a fresh browser each time.
+        started = False
+        for attempt in range(1, SESSION_START_RETRIES + 1):
+            log(worker_id, f"  starting session (attempt {attempt}/{SESSION_START_RETRIES}) "
+                           f"- fresh browser")
+            driver = build_driver(download_folder, worker_id=worker_id, window_index=worker_id - 1)
+            # 180s: on a slow day animics.gti.upf.edu can take a couple of minutes
+            # before the "Keyframe" button is clickable.
+            wait = WebDriverWait(driver, 180)
+            try:
+                if start_session(driver, wait, chunk_videos, worker_id=worker_id):
+                    started = True
+                    break
+            except Exception as e:
+                log(worker_id, f"  session start error: {str(e)[:120]}")
+            # this attempt failed - close the browser and try again
+            driver.quit()
+
+        if not started:
+            log(worker_id, f"  Could not start this chunk after {SESSION_START_RETRIES} "
+                           f"attempts, skipping its videos.")
+            results.extend({"ok": False, "name": v, "reason": "session start failed"}
+                           for v in chunk_videos)
+            continue
+
         try:
-            if not start_session(driver, wait, chunk_videos, worker_id=worker_id):
-                log(worker_id, "  Could not start this chunk's session, skipping its videos.")
-                results.extend({"ok": False, "name": v, "reason": "session start failed"}
-                               for v in chunk_videos)
-                continue
             for i in range(len(chunk_videos)):
                 results.append(process_video(driver, wait, i, is_first_in_session=(i == 0),
                                              worker_id=worker_id))
@@ -345,7 +404,10 @@ def animate_folder(video_folder, download_folder):
     videos, skipped = [], []
     for video_path in all_videos:
         base = os.path.splitext(os.path.basename(video_path))[0]
-        if os.path.exists(os.path.join(download_folder, base + ".glb")):
+        # Chrome replaces characters that are illegal in filenames (e.g. ? and ")
+        # with "_" when saving, so also accept that sanitized name.
+        safe = "".join("_" if c in '?"<>:|*\\/' else c for c in base)
+        if any(os.path.exists(os.path.join(download_folder, n + ".glb")) for n in (base, safe)):
             skipped.append(os.path.basename(video_path))
         else:
             videos.append(video_path)
